@@ -1,10 +1,13 @@
 from dotenv import load_dotenv
 from openai import OpenAI
 from openai import AzureOpenAI
+import openai._utils._transform
+from openai.types.chat import completion_create_params
 import json
 import os
 import datetime
 import inspect
+import re
 
 import python_code_notebook
 
@@ -19,6 +22,7 @@ class PythonCodeInterpreter():
 
         self.system_message = True
         self.deployment_name = deployment_name
+        self.persistent_data_dir = os.path.join(os.path.dirname(__file__), "data")
         self.current_messages_index = 1
         self.ipynb_result_dir = "results"
         self.ipynb_prefix = os.path.join(os.path.dirname(__file__), self.ipynb_result_dir, "running_")
@@ -28,11 +32,11 @@ class PythonCodeInterpreter():
         self.messages_system = [{
             "role": "system",
             "content": (
-                f"You are interacting with {deployment_name}, a large language model trained by OpenAI. "
+                f"You are interacting with {self.deployment_name}, a large language model. "
                 "The model is based on ReAct technology and uses Python for data analysis and visualization.\n"
                 "When a message containing Python code is sent to Python, it is executed in the state-preserving "
                 "Jupyter notebook environment. Python returns the results of the execution. "
-                "'/mnt/data' drive can be used to store and persist user files.\n"
+                f"'{self.persistent_data_dir}' drive can be used to store and persist user files.\n"
                 "Python is used to analyze, visualize, and predict the data. If you provide a data set, "
                 "we will analyze it and create appropriate graphs for visualization. Additionally, "
                 "we can extract trends from the data and provide future projections.\n"
@@ -97,7 +101,8 @@ class PythonCodeInterpreter():
 
     # Run Python code in the notebook
     def run_python_code_in_notebook(self, code: str, messages):
-        if code.startswith('{"python_code":'):
+        if re.match(r'^\s*\{\s*"python_code"\s*:', code):
+        # if code.startswith('{"python_code":'):
             code = json.loads(code)["python_code"]
 
         # Pause to review the program
@@ -130,30 +135,38 @@ class PythonCodeInterpreter():
         return
 
     def run_conversation(self, message):
-        result_name = f'result_{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}'
+        # Create a directory to store persistent data
+        if not os.path.exists(self.persistent_data_dir):
+            os.makedirs(self.persistent_data_dir, exist_ok=True)
+        # Initialize the messages
         if self.system_message is True:
             self.messages.extend(self.messages_system)
         self.messages.append({"role": "user", "content": message})
+        # Initialize variables
         max_loops = 200
         tool_choice_flag = False
         finish_flag = False
+        usage_total_tokens = 0
+        result_name = f'result_{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}'
+        # Conversations start
         for i in range(max_loops):
-            print(f"Loop {i+1}/{max_loops}")
+            print(f"Loop {i+1}/{max_loops}, total tokens used: {usage_total_tokens}")
+
             completion = self.client.chat.completions.create(
                 model=self.deployment_name,
                 messages=self.messages,
                 tools=self.tools,
-                # parallel_tool_calls=False,
-                # tool_choice="auto" if tool_choice_flag else "none", 
-                # temperature=0,
-                # seed=100,
 
+                # tool_choice="auto" if tool_choice_flag else "none", 
             )
+
+            usage_total_tokens += completion.usage.total_tokens
             response_message = completion.choices[0].message
             response_reason = completion.choices[0].finish_reason
             response_role = response_message.role
 
             if response_reason == 'tool_calls':
+                self.messages.append(response_message)
                 for tool_call in response_message.tool_calls:
                     function_name = tool_call.function.name
                     function_arguments = tool_call.function.arguments
@@ -169,14 +182,14 @@ class PythonCodeInterpreter():
                     function_response = function_to_call(function_arguments, content_messages)
 
                     # special treatment. For some reason, an error occurs when inserting a figure strings
-                    if function_response.startswith('<Figure size'):
-                        function_response = "Omitted due to the large size of the image."
+                    # if function_response.startswith('<Figure size'):
+                    #     function_response = "Omitted due to the large size of the image."
 
-                    self.messages.append(response_message)
                     self.messages.append(
                         {
                             "role": "tool",
                             "tool_call_id": tool_call.id,
+                            "name": function_name,
                             "content": function_response,
                         }
                     )
@@ -208,70 +221,21 @@ class PythonCodeInterpreter():
         self.ipynb_file = os.path.join(os.path.dirname(__file__), self.ipynb_result_dir, f'{result_name}.ipynb')
         os.rename(current_ipynb_file, self.ipynb_file)
         self.result_file = os.path.join(os.path.dirname(__file__), self.ipynb_result_dir, f'{result_name}.json')
-        with open(self.result_file, 'w') as f:
-            print(self.messages, file=f)
+        with open(self.result_file, 'w', encoding='utf-8') as f:
+            request_body = openai._utils._transform.maybe_transform({
+                "messages": self.messages,
+                "model": self.deployment_name,
+                "tools": self.tools
+            }, completion_create_params.CompletionCreateParamsNonStreaming)
+            json.dump(request_body, f, ensure_ascii=False)
         return self.messages
 
 if __name__ == '__main__':
-    message = (
-        "半導体イオン注入装置におけるアーク放電の発生回数が増加する原因を以下の DATA_DIRECTORY の各FILE_TYPEの全てのデータから調べて下さい。\n"
-        "ドメイン知識も活用してください。アーク放電の発生回数が増加する原因を知りたいです。\n"
-        "- DATA_DIRECTORY には、 ヘッダ名が異なるデータのグループがディレクトリ毎に各格納されています。\n"
-        "- FILE_TYPE毎に異なるデータが入っていますが、timestampは全てのFILE_TYPEに含まれていますので、indexとして使ってください。\n"
-        "- アーク放電の発生回数の累計を示すデータのヘッダ名は、 *ArcingCount* ですが、全てのFILE_TYPEには含まれていません。\n"
-        "- 各ファイルは全て同一の時間インデックス（timestamp）を持ち、計測データの種類ごとにカラムを分割して複数ファイルに分けて保存しているという構造です。\n"
-        "- 目的変数は 複数の*ArcingCount* ヘッダになります。また、類型になるため、前ステップとの差を求めるとアーク放電の発生時間を知ることができます。\n"
-        "- アーク放電の発生回数が増加する説明変数から 複数の*ArcingCount* ヘッダ名を除いてください。\n"
-        "- 数値に変換できない場合はカテゴリ変数として enum 数値に変換してください。\n"
-        "- function_callingのpythonにコメントを記載てください。\n"
-        "\n"
-        "# DATA_DIRECTORY\n"
-        "/mnt/data/em02_data/csvlog_202209_rs\n"
-        "\n"
-        "# FILE_TYPE\n"
-        "sv_history_f8_1000_01_*.csv\n"
-        "sv_history_f8_60000_01_*.csv\n"
-        "sv_history_f8_0050_05_*.csv\n"
-        "sv_history_f8_1000_03_*.csv\n"
-        "sv_history_bo_0100_03_*.csv\n"
-        "sv_history_f8_0050_01_*.csv\n"
-        "sv_history_i4_0050_01_*.csv\n"
-        "sv_history_bo_0050_01_*.csv\n"
-        "sv_history_f8_0100_02_*.csv\n"
-        "sv_history_bo_0050_03_*.csv\n"
-        "sv_history_bo_0100_01_*.csv\n"
-        "sv_history_bo_0100_02_*.csv\n"
-        "sv_history_bo_1000_01_*.csv\n"
-        "sv_history_f8_0050_04_*.csv\n"
-        "sv_history_bo_0050_04_*.csv\n"
-        "sv_history_a_0100_01_*.csv\n"
-        "sv_history_bo_0050_02_*.csv\n"
-        "sv_history_a_1000_01_*.csv\n"
-        "sv_history_f8_1000_02_*.csv\n"
-        "sv_history_i4_1000_01_*.csv\n"
-        "sv_history_f8_0050_02_*.csv\n"
-        "sv_history_i4_0100_01_*.csv\n"
-        "sv_history_bo_1000_02_*.csv\n"
-        "sv_history_f8_0100_01_*.csv\n"
-        "sv_history_f8_0050_03_*.csv\n"
-        "\n"
-        "# FILE_FORMAT\n"
-        "FILE_TYPE_YYYY-MM-DD.csv\n"
-        "## 例\n"
-        "sv_history_f8_0050_04_2023_11_06.csv\n"
-        "\n"
-        "# アーク放電の発生回数ヘッダ名\n"
-        "## 例\n"
-        "PM.BeamSystem.EnergyController.ExtractionForHighEnergy.ArcingCount_mean\n"
-        "PM.BeamSystem.EnergyController.Decel.ArcingCount_mean\n"
-        "PM.BeamSystem.BeamCorrector.EBendOuter.ArcingCount_mean\n"
-        "PM.BeamSystem.BeamCorrector.DecelFocus.ArcingCount_mean\n"
-        "PM.BeamSystem.BeamCorrector.EBendMid.ArcingCount_mean\n"
-        "PM.BeamSystem.BeamCorrector.EBendInner.ArcingCount_mean\n"
-        "\n"
-        )
-
-
+    # message = "Get the NVIDIA stock price from January to March 2023 from Yahoo and predict the stock price after April 2023." # sample_01
+    # message = "Determine whether the data in ./sample_data/diagnosis.csv is malignant or benign. To make a decision, use the model learned using the load_breast_cancer data available from scikit-learn." # sample_02
+    # message = "2023年の1月から3月のNVIDIA株価をYahooから取得して、2023年4月以降の株価を予測してください。" # sample_03
+    message = "./sample_data/diagnosis.csv のデータが悪性か良性か判断してください。判断は、scikit-learn から取得できる load_breast_cancer データで学習したモデルを使ってください。日本語で説明してください。" # sample_04
+    # message = "./sample_data/chinook.db のsqlite3データベースから、最も多くのトラックを持つアルバムの名前を調べてください。"
     print(f"Message: {message}")
     # Initialize the Python Code Interpreter
     pci = PythonCodeInterpreter(deployment_name)

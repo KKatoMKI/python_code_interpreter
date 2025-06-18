@@ -73,10 +73,11 @@ class PythonCodeInterpreter():
         } 
     
     def ask_continue(self):
-        result = False
-        user_input = input("Do you want to continue running this program?(yes/no): ").strip().lower()
-        if user_input == "yes":
-            result = True
+        # result = False
+        # user_input = input("Do you want to continue running this program?(yes/no): ").strip().lower()
+        # if user_input == "yes":
+        #     result = True
+        result = True
         return result
 
     # helper method used to check if the correct arguments are provided to a function
@@ -142,7 +143,7 @@ class PythonCodeInterpreter():
                 model=self.deployment_name,
                 messages=self.messages,
                 tools=self.tools,
-                parallel_tool_calls=False,
+                # parallel_tool_calls=False,
                 # tool_choice="auto" if tool_choice_flag else "none", 
                 # temperature=0,
                 # seed=100,
@@ -212,10 +213,65 @@ class PythonCodeInterpreter():
         return self.messages
 
 if __name__ == '__main__':
-    # message = "Get the NVIDIA stock price from January to March 2023 from Yahoo and predict the stock price after April 2023." # sample_01
-    message = "Determine whether the data in /mnt/data/diagnosis.csv is malignant or benign. To make a decision, use the model learned using the load_breast_cancer data available from scikit-learn." # sample_02
-    # message = "2023年の1月から3月のNVIDIA株価をYahooから取得して、2023年4月以降の株価を予測してください。" # sample_03
-    # message = "/mnt/data/diagnosis.csv のデータが悪性か良性か判断してください。判断は、scikit-learn から取得できる load_breast_cancer データで学習したモデルを使ってください。日本語で説明してください。" # sample_04
+    message = (
+        "半導体イオン注入装置におけるアーク放電の発生回数が増加する原因を以下の DATA_DIRECTORY の各FILE_TYPEの全てのデータから調べて下さい。\n"
+        "ドメイン知識も活用してください。アーク放電の発生回数が増加する原因を知りたいです。\n"
+        "- DATA_DIRECTORY には、 ヘッダ名が異なるデータのグループがディレクトリ毎に各格納されています。\n"
+        "- FILE_TYPE毎に異なるデータが入っていますが、timestampは全てのFILE_TYPEに含まれていますので、indexとして使ってください。\n"
+        "- アーク放電の発生回数の累計を示すデータのヘッダ名は、 *ArcingCount* ですが、全てのFILE_TYPEには含まれていません。\n"
+        "- 各ファイルは全て同一の時間インデックス（timestamp）を持ち、計測データの種類ごとにカラムを分割して複数ファイルに分けて保存しているという構造です。\n"
+        "- 目的変数は 複数の*ArcingCount* ヘッダになります。また、類型になるため、前ステップとの差を求めるとアーク放電の発生時間を知ることができます。\n"
+        "- アーク放電の発生回数が増加する説明変数から 複数の*ArcingCount* ヘッダ名を除いてください。\n"
+        "- 数値に変換できない場合はカテゴリ変数として enum 数値に変換してください。\n"
+        "- function_callingのpythonにコメントを記載てください。\n"
+        "\n"
+        "# DATA_DIRECTORY\n"
+        "/mnt/data/em02_data/csvlog_202209_rs\n"
+        "\n"
+        "# FILE_TYPE\n"
+        "sv_history_f8_1000_01_*.csv\n"
+        "sv_history_f8_60000_01_*.csv\n"
+        "sv_history_f8_0050_05_*.csv\n"
+        "sv_history_f8_1000_03_*.csv\n"
+        "sv_history_bo_0100_03_*.csv\n"
+        "sv_history_f8_0050_01_*.csv\n"
+        "sv_history_i4_0050_01_*.csv\n"
+        "sv_history_bo_0050_01_*.csv\n"
+        "sv_history_f8_0100_02_*.csv\n"
+        "sv_history_bo_0050_03_*.csv\n"
+        "sv_history_bo_0100_01_*.csv\n"
+        "sv_history_bo_0100_02_*.csv\n"
+        "sv_history_bo_1000_01_*.csv\n"
+        "sv_history_f8_0050_04_*.csv\n"
+        "sv_history_bo_0050_04_*.csv\n"
+        "sv_history_a_0100_01_*.csv\n"
+        "sv_history_bo_0050_02_*.csv\n"
+        "sv_history_a_1000_01_*.csv\n"
+        "sv_history_f8_1000_02_*.csv\n"
+        "sv_history_i4_1000_01_*.csv\n"
+        "sv_history_f8_0050_02_*.csv\n"
+        "sv_history_i4_0100_01_*.csv\n"
+        "sv_history_bo_1000_02_*.csv\n"
+        "sv_history_f8_0100_01_*.csv\n"
+        "sv_history_f8_0050_03_*.csv\n"
+        "\n"
+        "# FILE_FORMAT\n"
+        "FILE_TYPE_YYYY-MM-DD.csv\n"
+        "## 例\n"
+        "sv_history_f8_0050_04_2023_11_06.csv\n"
+        "\n"
+        "# アーク放電の発生回数ヘッダ名\n"
+        "## 例\n"
+        "PM.BeamSystem.EnergyController.ExtractionForHighEnergy.ArcingCount_mean\n"
+        "PM.BeamSystem.EnergyController.Decel.ArcingCount_mean\n"
+        "PM.BeamSystem.BeamCorrector.EBendOuter.ArcingCount_mean\n"
+        "PM.BeamSystem.BeamCorrector.DecelFocus.ArcingCount_mean\n"
+        "PM.BeamSystem.BeamCorrector.EBendMid.ArcingCount_mean\n"
+        "PM.BeamSystem.BeamCorrector.EBendInner.ArcingCount_mean\n"
+        "\n"
+        )
+
+
     print(f"Message: {message}")
     # Initialize the Python Code Interpreter
     pci = PythonCodeInterpreter(deployment_name)
